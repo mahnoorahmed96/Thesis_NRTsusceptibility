@@ -1,0 +1,76 @@
+var su = ee.FeatureCollection("your mapping unit") //in my case they were slope units (polygons)
+var aoi =ee.FeatureCollection("your area bounding polygon which contains the mapping units") //a plygon shapefile surrounding my slope units
+
+/////////////////////different inventories with different dates to extract corresponding rainfall///////////////////
+// inv1 = '2017-08-02', '2017-08-03'
+// inv2 = '2017-08-23', '2017-08-28'
+// inv3 = '2017-10-10', '2017-10-11'
+// inv4 = '2018-06-23', '2018-06-24'
+// inv5 = '2018-08-03'
+// inv6 = '2018-08-27', '2018-09-01'
+
+var id=aoi.geometry(); 
+///////////////////////////rainfall//////////////////////////
+var chirps = ee.ImageCollection('UCSB-CHG/CHIRPS/DAILY');
+var startdate = ee.Date('2017-08-28'); // taking the date reported for LS event, different LS event rainfall need to be exported with different dates
+print(startdate, 'The base date/time');
+var days = ee.List.sequence(-14, -1);
+
+var antec = function(day)
+{
+  var end_date = startdate;
+  var start_date = startdate.advance(day,'day');
+  var precip_collection = chirps.filterDate(start_date,end_date);
+  var date='AntRFinv2'
+  return precip_collection.sum().rename(date)
+}; /// creating a function to map antecedent rainfall, for t-1 to t-14 days from the event (t)
+
+var ant_data = days.map(antec);
+var ant_data_image = ee.ImageCollection(ant_data).toBands().clip(aoi);
+
+
+//////////////////////////////////////////////////////////////////max daily precipitation/////////////////////////////
+var rangeprecip = chirps.filterDate('2017-08-23', '2017-08-28');
+var precip = rangeprecip.max().rename('MaxRFinv2');
+
+/////////////////////////////////////////////////////////EVI or NDVI//////////////////////////////// 
+//MODIS
+
+var EVI = function(image) {
+  return image.expression('float(b("EVI")/10000)') // scaling evi values to -1 to 1
+};
+
+var collection = ee.ImageCollection('MODIS/006/MYD13Q1');
+var col = ee.ImageCollection(collection.filterDate('2017-08-07', '2017-08-28').filterBounds(id));
+var EVIband = col.select('EVI')
+var modisEVI = EVIband.map(EVI);
+var EVImean = modisEVI.reduce(ee.Reducer.mean()).rename('EVIinv2');
+
+var reducer = ee.Reducer.mean().combine({
+  reducer2: ee.Reducer.stdDev(),
+  sharedInputs: true
+});
+
+////////////////////////////////////////////// extracting the data to mapping units////////////////////////////////
+var extractTopolygon=function(feature){
+  //reduce variable data with multi temporal 
+  var ant_precip=ant_data_image.reduceRegion({reducer: ee.Reducer.mean(),geometry: feature.geometry(),
+  crs: 'EPSG:32648',scale:100,maxPixels:3000000000});
+  var dailymax = precip.reduceRegion({reducer: ee.Reducer.mean(), geometry: feature.geometry(),
+  crs: 'EPSG:32648',scale:100,maxPixels:3000000000});
+  var EVIavg = EVImean.reduceRegion({reducer: reducer,geometry: feature.geometry(),
+  crs: 'EPSG:32648',scale:10,maxPixels:3000000000});
+  
+  feature = feature.set(ant_precip);
+  feature = feature.set(dailymax);
+  feature = feature.set(EVIavg);
+  return feature.setGeometry(null);
+  };
+  
+//////////////////////////////////////////////saving csv file to google drive////////////////////////////////////////  
+var extracted_data=su.map(extractTopolygon);
+Export.table.toDrive({
+  collection: extracted_data,
+  description:'inventory2',
+  fileFormat: 'CSV'
+});
