@@ -7,8 +7,8 @@
 var TAGEE = require('users/joselucassafanelli/TAGEE:TAGEE-functions');
 print(TAGEE)
 //////////////////////////////////////////////////////////////////////
-var table=ee.FeatureCollection("shapefile of mapping units"); ////mapping units
-var table2=ee.FeatureCollection("shapefile of study area containing the mapping units"); ////area containing the static covariates
+var table=ee.FeatureCollection("your mapping unit") //in my case they were slope units (polygons)
+var table2=ee.FeatureCollection("your area bounding polygon which contains the mapping units") //a plygon shapefile surrounding my slope units
 
 var main=function(){
 var id=table2.geometry();
