@@ -1,0 +1,74 @@
+/////////////////////////////////////////////////////////////////////
+//Safanelli, J.L.; Poppiel, R.R.; Ruiz, L.F.C.; Bonfatti, B.R.; Mello, F.A.O.; Rizzo, R.; Demattê, J.A.M.
+//Terrain Analysis in Google Earth Engine: A Method Adapted for High-Performance Global-Scale Analysis.
+//ISPRS Int. J. Geo-Inf. 2020, 9, 400. DOI: https://doi.org/10.3390/ijgi9060400
+//GitHub: https://github.com/zecojls/tagee
+
+var TAGEE = require('users/joselucassafanelli/TAGEE:TAGEE-functions');
+print(TAGEE)
+//////////////////////////////////////////////////////////////////////
+var table=ee.FeatureCollection("shapefile of mapping units"); ////mapping units
+var table2=ee.FeatureCollection("shapefile of study area containing the mapping units"); ////area containing the static covariates
+
+var main=function(){
+var id=table2.geometry();
+var gridcoll=ee.FeatureCollection(table).filterBounds(id);
+
+/////////////////////////////////////////////////////////////topographic features////////////////////////////////
+
+var demSRTM1 = ee.Image('USGS/SRTMGL1_003');
+var demSRTM = demSRTM1.rename('DEM');
+var DEMAttributes = TAGEE.terrainAnalysis(TAGEE, demSRTM, id);
+
+///////////////////////////////////////////////////////////////relief///////////////////////////
+
+var reduced = DEMAttributes.select('Elevation').projection().atScale(30);
+var dem= DEMAttributes.select('Elevation').reproject(reduced);
+var k1 = dem.focal_max(1000,'square','meters',1);
+var k2 = dem.focal_min(1000,'square','meters',1);//1km of radius
+var range = k1.subtract(k2);
+var f = function(image) {
+return image.reduceRegions({
+collection: gridcoll,
+reducer: ee.Reducer.mean().combine({
+reducer2: ee.Reducer.stdDev(),
+sharedInputs: true
+}),
+crs : 'EPSG: 32648',
+scale: 30
+});
+};
+
+var iter = function(var1,layer){
+var gridcoll=f(layer);
+
+gridcoll = gridcoll.map(function(feature) {
+return feature.set(var1.concat('_mean'), feature.get('mean'));
+});
+
+return gridcoll.map(function(feature) {
+return feature.set(var1.concat('_std'), feature.get('stdDev'));
+});
+};
+
+/////////////////////////////////////////////////////////slope, hcv, vcv....other static covariates /////////////////////////////////////////////
+var gridcoll = iter('Slope',DEMAttributes.select('Slope'));
+var gridcoll = iter('Elev',DEMAttributes.select('Elevation'));
+var gridcoll = iter('Asp',DEMAttributes.select('Aspect'));
+var gridcoll = iter('Nss',DEMAttributes.select('Northness'));
+var gridcoll = iter('Ess',DEMAttributes.select('Eastness'));
+var gridcoll = iter('MCv',DEMAttributes.select('MeanCurvature'));
+var gridcoll = iter('SIdx',DEMAttributes.select('ShapeIndex'));
+var gridcoll = iter('HCv',DEMAttributes.select('HorizontalCurvature'));
+var gridcoll = iter('VCv',DEMAttributes.select('VerticalCurvature'));
+var gridcoll = iter('Rlf',range);
+return gridcoll;
+};
+///////////////////////////////////////////////////Export the FeatureCollection to a KML file or CSV file /////////////////////////////////////////
+var griglia=main();
+
+Export.table.toDrive({
+collection: griglia,
+description:'Static_Covariates',
+fileFormat: 'CSV'
+});
